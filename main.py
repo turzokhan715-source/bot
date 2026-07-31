@@ -1,5 +1,4 @@
 import logging
-import os
 import re
 import threading
 import time
@@ -19,49 +18,42 @@ HEADERS = {"mauthapi": API_KEY, "Content-Type": "application/json"}
 BOT_TOKEN = "8719901060:AAF013K1EnqAIIXQS_0X4SxJIa3FdjNJ0Lg"
 LOG_GROUP_ID = -1004315116332
 
-file_lock = threading.Lock()
 
-
-def get_credentials_from_file():
-    """fb.txt ফাইল থেকে rid রিড করবে"""
-    with file_lock:
-        if not os.path.exists("fb.txt"):
-            return None
-        with open("fb.txt", "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        rid = None
-        for line in lines:
-            line_str = line.strip()
-            if line_str.startswith("rid|"):
-                if not rid:
-                    rid = line_str.split("|")[1]
-                    break
-        return rid
-
-
-def get_countries_from_api(rid):
-    """API থেকে বর্তমানে কোন কোন দেশের সার্ভিস বা নাম্বার এভেলেবল আছে তা আনবে"""
+def get_active_countries_from_otps():
+    """সফল ওটিপির তালিকা থেকে স্বয়ংক্রিয়ভাবে দেশ বা প্রিফিক্স বের করবে যেখানে কোড আসছে"""
     try:
-        response = requests.post(
-            f"{BASE_URL}/countries", headers=HEADERS, json={"rid": rid}
-        ).json()
+        response = requests.get(f"{BASE_URL}/success-otp", headers=HEADERS).json()
         if response.get("meta", {}).get("code") == 200:
-            return response.get("data", [])
+            otps_list = response.get("data", {}.get("otps", []))
+            countries_set = set()
+            
+            for otp in otps_list:
+                number = otp.get("number", "")
+                message = otp.get("message", "")
+                
+                # যদি ফেসবুক বা কোড সম্পর্কিত হয়, তবে নাম্বার থেকে দেশ বা প্রিফিক্স আলাদা করা
+                if number and ("facebook" in message.lower() or "fb" in message.lower() or re.search(r"\d+", message)):
+                    # এখানে নাম্বার থেকে দেশের কোড বা অংশ আলাদা করা যেতে পারে
+                    # অথবা সরাসরি নাম্বার বা কান্ট্রি ট্যাগ ব্যবহার করা যায়
+                    country_code = number[:3]  # উদাহরণের জন্য প্রথম ৩ ডিজিট বা কান্ট্রি প্রিফিক্স
+                    countries_set.add((country_code, number))
+                    
+            return list(countries_set)
     except Exception as e:
-        logging.error(f"Error fetching countries: {e}")
+        logging.error(f"Error fetching active countries: {e}")
     return []
 
 
-def get_number_by_country(rid, country_id):
-    """নির্বাচিত দেশের আইডি অনুযায়ী API থেকে নাম্বার তুলবে"""
+def get_number_from_api():
+    """API থেকে নতুন নাম্বার তুলবে"""
     try:
         response = requests.post(
-            f"{BASE_URL}/getnum", headers=HEADERS, json={"rid": rid, "country": country_id}
+            f"{BASE_URL}/getnum", headers=HEADERS, json={}
         ).json()
         if response.get("meta", {}).get("code") == 200:
             return response["data"].get("no_plus_number")
     except Exception as e:
-        logging.error(f"Error fetching number for country {country_id}: {e}")
+        logging.error(f"Error fetching number: {e}")
     return None
 
 
@@ -78,29 +70,18 @@ def get_otp_from_api(target):
     return None
 
 
-# --- টেলিগ্রাম ইন্টারফেস হ্যান্ডলার ---
+# --- টেলিগ্রাম কমান্ড হ্যান্ডলার ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    rid = get_credentials_from_file()
-    if not rid:
-        await update.message.reply_text("❌ `fb.txt` ফাইলে `rid` পাওয়া যায়নি!")
-        return
-
-    # API থেকে অটো দেশগুলোর তালিকা নিয়ে আসা
-    countries = get_countries_from_api(rid)
-    if not countries:
-        await update.message.reply_text("❌ এই মুহূর্তে API-তে কোনো দেশের নাম্বার এভেলেবল নেই।")
-        return
-
-    # দেশগুলোর নাম দিয়ে ডায়নামিক ইনলাইন বাটন তৈরি করা (যেমন: Guinea, Egypt ইত্যাদি)
+    # এপিআই থেকে যে দেশগুলোতে কোড আসছে সেগুলো অটো ফেচ করা
+    active_items = get_active_countries_from_otps()
+    
     keyboard = []
-    for country in countries:
-        c_name = country.get("name", "Unknown")
-        c_id = country.get("id")
-        keyboard.append([InlineKeyboardButton(f"🌍 {c_name}", callback_data=f"country_{c_id}")])
+    # সাধারণ একটিভ বাটন অথবা অটো জেনারেটেড দেশ/নাম্বারের বাটন তৈরি
+    keyboard.append([InlineKeyboardButton("📱 Get Active Facebook Number", callback_data="get_live_num")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
-        "✨ **স্বাগতম!** নিচের তালিকা থেকে যে দেশের নাম্বার নিতে চান তাতে ক্লিক করুন:",
+        "✨ **স্বাগতম!** যে সমস্ত নাম্বারে ফেসবুক কোড আসছে সেগুলোর ভিত্তিতে বট প্রস্তুত। নাম্বার নিতে নিচে ক্লিক করুন:",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
@@ -111,18 +92,14 @@ async def button_click_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
 
     data = query.data
-    if data.startswith("country_"):
-        country_id = data.split("_")[1]
-        rid = get_credentials_from_file()
+    if data == "get_live_num":
+        await query.edit_message_text("⏳ এপিআই থেকে নাম্বার সংগ্রহ করা হচ্ছে...")
 
-        await query.edit_message_text("⏳ নির্বাচিত দেশের নাম্বার সংগ্রহ করা হচ্ছে...")
-
-        phone = get_number_by_country(rid, country_id)
+        phone = get_number_from_api()
         if not phone:
-            await query.edit_message_text("❌ দুঃখিত, এই মুহূর্তে এই দেশে কোনো নাম্বার খালি নেই।")
+            await query.edit_message_text("❌ দুঃখিত, এই মুহূর্তে কোনো নাম্বার খালি নেই।")
             return
 
-        # ইউজারের ইনবক্সে নাম্বার পাঠানো
         assigned_text = (
             "✅ **Number Assigned!**\n\n"
             f"📱 **Facebook** | `{phone}`\n\n"
@@ -141,10 +118,8 @@ async def button_click_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                     f"💬 *Thanks for using @tn_ms_bot*"
                 )
 
-                # ইনবক্সে পাঠানো
                 await query.message.reply_text(otp_display_text, parse_mode="Markdown")
 
-                # লগ গ্রুপে পাঠানো
                 try:
                     await context.bot.send_message(
                         chat_id=LOG_GROUP_ID,
@@ -165,7 +140,7 @@ def main():
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CallbackQueryHandler(button_click_handler))
 
-    logging.info("ডায়নামিক কান্ট্রি ওটিপি বট চালু হচ্ছে...")
+    logging.info("অটো-ডিটেক্ট ওটিপি বট চালু হচ্ছে...")
     app.run_polling()
 
 
