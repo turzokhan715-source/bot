@@ -1,7 +1,6 @@
 import asyncio
 import sqlite3
 import time
-import requests
 import aiohttp
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
@@ -15,12 +14,14 @@ from telegram.ext import (
 )
 
 # ==========================================
-# ⚙️ কনফিগারেশন সমূহ
+# ⚙️ কনফিগারেশন সমূহ (Voltexx API Update)
 # ==========================================
-# Render পরিবেশ থেকে টোকেন নেওয়ার জন্য os.getenv ব্যবহার করা হয়েছে, না পেলে ডিফল্ট হিসেবে নতুন টোকেন থাকবে
 TELEGRAM_BOT_TOKEN = os.getenv("BOT_TOKEN", '8816724773:AAGtagQF2r0UvC8_B8TXzfT5MP-Z054fWo')
-ZENEX_API_KEY = 'ZNX_KJKFEC3OWABQT5ODQQC3D3JN'
-ZENEX_BASE_URL = 'https://api.zenexnetwork.com'
+
+# Voltexx API Configuration
+VOLTEXX_BASE_URL = 'https://api.2oo9.cloud/MXS47FLFX0U/tnevs/@public/api'
+VOLTEXX_API_KEY = 'ZNX_KJKFEC3OWABQT5ODQQC3D3JN'  # যদি এপিআই কি প্রয়োজন হয়
+VOLTEXX_HEADERS = {'mapikey': VOLTEXX_API_KEY}
 
 ADMIN_IDS = [7875418255, 6272151736]
 
@@ -32,8 +33,6 @@ OTP_GROUP_LINK = 'https://t.me/FacebookOTPGroup1'
 
 BOT_USERNAME = '@FastCloudOTP_bot'
 BOT_LINK = 'https://t.me/FastCloudOTP_bot'
-
-ZENEX_HEADERS = {'mapikey': ZENEX_API_KEY}
 
 # ==========================================
 # 🗄️ DATABASE SETUP
@@ -55,13 +54,6 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS settings (
 cursor.execute('''CREATE TABLE IF NOT EXISTS services (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE
-)''')
-
-cursor.execute('''CREATE TABLE IF NOT EXISTS custom_ranges (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    service_name TEXT,
-    range_code TEXT,
-    expires_at INTEGER
 )''')
 
 cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('otp_price', '10')")
@@ -102,7 +94,7 @@ async def send_join_request_msg(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(msg, parse_mode='Markdown', reply_markup=reply_markup)
 
 # ==========================================
-# 🔘 UI MENUS (PERSISTENT KEYBOARD FOR FIXED BUTTONS)
+# 🔘 UI MENUS
 # ==========================================
 def get_main_menu_keyboard():
     keyboard = [
@@ -115,8 +107,7 @@ async def send_admin_panel(update: Update):
     keyboard = [
         [InlineKeyboardButton("1. Per OTP Price Change 💰", callback_data="admin_change_price")],
         [InlineKeyboardButton("2. Add Service ➕", callback_data="admin_add_service")],
-        [InlineKeyboardButton("3. Add Service Range 🎯", callback_data="admin_add_range")],
-        [InlineKeyboardButton("4. Delete Service 🗑️", callback_data="admin_delete_service")],
+        [InlineKeyboardButton("3. Delete Service 🗑️", callback_data="admin_delete_service")],
         [InlineKeyboardButton("📢 Ultra Fast Broadcast", callback_data="admin_broadcast")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -137,12 +128,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
     conn.commit()
 
-    # Admin Command Check
     if (text.lower() in ['admin', '/admin']) and user_id in ADMIN_IDS:
         await send_admin_panel(update)
         return
 
-    # 🔴 ADMIN INPUT HANDLING
     if user_id in admin_state:
         state = admin_state[user_id]
 
@@ -165,36 +154,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"✅ **{text.strip()}** সার্ভিস সফলভাবে যোগ করা হয়েছে!", parse_mode='Markdown', reply_markup=get_main_menu_keyboard())
             except Exception:
                 await update.message.reply_text("❌ সমস্যা হয়েছে।")
-            return
-
-        elif state.get('step') == 'awaiting_range_code':
-            admin_state[user_id] = {'step': 'awaiting_range_service', 'rangeCode': text.strip()}
-            cursor.execute("SELECT name FROM services")
-            rows = cursor.fetchall()
-            keyboard = [[InlineKeyboardButton(r[0], callback_data=f"select_rng_srv_{r[0]}")] for r in rows]
-            await update.message.reply_text(
-                f"🎯 `{text.strip()}` রেঞ্জটি কোন সার্ভিসের জন্য সেট করতে চান?",
-                parse_mode='Markdown',
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            return
-
-        elif state.get('step') == 'awaiting_range_hours':
-            try:
-                hours = float(text)
-                if hours <= 0:
-                    raise ValueError
-                expires_at = int((time.time() + (hours * 3600)) * 1000)
-                srv_name = state['serviceName']
-                rng_code = state['rangeCode']
-
-                cursor.execute("INSERT INTO custom_ranges (service_name, range_code, expires_at) VALUES (?, ?, ?)",
-                               (srv_name, rng_code, expires_at))
-                conn.commit()
-                del admin_state[user_id]
-                await update.message.reply_text(f"✅ **{srv_name}** সার্ভিসের জন্য `{rng_code}` রেঞ্জটি **{hours} ঘণ্টার** জন্য অ্যাক্টিভ করা হলো!", parse_mode='Markdown', reply_markup=get_main_menu_keyboard())
-            except ValueError:
-                await update.message.reply_text("❌ সঠিক ঘণ্টা দিন (যেমন: 1, 2, 5, 24)!")
             return
 
         elif state.get('step') == 'awaiting_broadcast':
@@ -241,16 +200,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ মেসেজ পাঠানো যায়নি।")
             return
 
-    # 🛑 FORCE JOIN CHECK
     is_joined = await check_must_join(context.bot, user_id)
     if not is_joined:
         await send_join_request_msg(update, context)
         return
 
-    # USER NAVIGATION
     if text == '/start':
         name = update.effective_user.first_name
-        welcome_msg = f"👋 **স্বাগতম, {name}!**\n\n🤖 **Bot Name:** Facebook~OTP\n⚡ **Status:** Active & Instant OTP Delivery Service\n\nঅপশন সিলেক্ট করে সেবা নেওয়া শুরু করুন!"
+        welcome_msg = f"👋 **স্বাগতম, {name}!**\n\n🤖 **Bot Name:** Voltexx OTP Bot\n⚡ **Status:** Active & Instant OTP Delivery Service\n\nঅপশন সিলেক্ট করে সেবা নেওয়া শুরু করুন!"
         await update.message.reply_text(welcome_msg, parse_mode='Markdown', reply_markup=get_main_menu_keyboard())
 
     elif text == 'Get Number ✅':
@@ -307,7 +264,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("❌ আপনি এখনো সবগুলোতে জয়েন করেননি! দয়া করে চেক করুন।", show_alert=True)
         return
 
-    # Admin Handlers
     if user_id in ADMIN_IDS:
         if data == 'admin_change_price':
             admin_state[user_id] = {'step': 'awaiting_price'}
@@ -317,10 +273,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             admin_state[user_id] = {'step': 'awaiting_service_name'}
             await context.bot.send_message(chat_id, "➕ **Add Service:**\nনতুন সার্ভিসের নাম টাইপ করুন:")
             return
-        elif data == 'admin_add_range':
-            admin_state[user_id] = {'step': 'awaiting_range_code'}
-            await context.bot.send_message(chat_id, "🎯 **Add Service Range:**\nনির্দিষ্ট Range কোডটি দিন (যেমন: `447384XXX`):", parse_mode='Markdown')
-            return
         elif data == 'admin_delete_service':
             cursor.execute("SELECT name FROM services")
             rows = cursor.fetchall()
@@ -328,27 +280,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(chat_id, "ডিলিট করার মতো কোনো সার্ভিস নেই।")
                 return
             keyboard = [[InlineKeyboardButton(f"❌ {r[0]}", callback_data=f"del_srv_act_{r[0]}")] for r in rows]
-            await context.bot.send_message(
-                chat_id,
-                "আপনি কোন সার্ভিসটি ডিলিট করতে চান 🧐?",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
+            await context.bot.send_message(chat_id, "আপনি কোন সার্ভিসটি ডিলিট করতে চান 🧐?", reply_markup=InlineKeyboardMarkup(keyboard))
             return
         elif data.startswith('del_srv_act_'):
             s_name = data.replace('del_srv_act_', '')
             if s_name.lower() == 'facebook':
-                await query.answer("⚠️ Facebook সার্ভিসটি ডিলিট করা সম্ভব নয়! এটি সিস্টেমের ডিফল্ট সার্ভিস।", show_alert=True)
+                await query.answer("⚠️ Facebook সার্ভিসটি ডিলিট করা সম্ভব নয়!", show_alert=True)
                 return
-            
             cursor.execute("DELETE FROM services WHERE name = ?", (s_name,))
             conn.commit()
             await context.bot.send_message(chat_id, f"✅ **{s_name}** সার্ভিসটি সফলভাবে ডিলিট করা হয়েছে!", parse_mode='Markdown')
-            return
-        elif data.startswith('select_rng_srv_'):
-            s_name = data.replace('select_rng_srv_', '')
-            admin_state[user_id]['serviceName'] = s_name
-            admin_state[user_id]['step'] = 'awaiting_range_hours'
-            await context.bot.send_message(chat_id, f"⏱️ এই **{s_name}** সার্ভিসের জন্য `{admin_state[user_id]['rangeCode']}` রেঞ্জটি কত ঘণ্টার জন্য অ্যাক্টিভ রাখতে চান? ঘণ্টার সংখ্যা লিখুন:", parse_mode='Markdown')
             return
         elif data == 'admin_broadcast':
             admin_state[user_id] = {'step': 'awaiting_broadcast'}
@@ -360,7 +301,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id, f"✍️ User `{target_user}` এর জন্য আপনার উত্তরটি টাইপ করুন:", parse_mode='Markdown')
             return
 
-    # ⚡ ULTRA FAST ASYNC NUMBER FETCHING SYSTEM
+    # ⚡ FULLY AUTOMATIC VOLTEXX API NUMBER FETCHING
     if data.startswith('get_srv_num_'):
         is_joined = await check_must_join(context.bot, user_id)
         if not is_joined:
@@ -368,40 +309,38 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         service_name = data.replace('get_srv_num_', '')
-        
-        await context.bot.send_message(chat_id, f"⚡ **{service_name}** এর জন্য সেরা নম্বরের রেঞ্জ প্রসেস করা হচ্ছে...")
+        await context.bot.send_message(chat_id, f"⚡ **{service_name}** এর জন্য Voltexx থেকে লাইভ রেঞ্জ অটো-ফেচ করা হচ্ছে...")
 
-        now = int(time.time() * 1000)
-        cursor.execute("SELECT range_code FROM custom_ranges WHERE service_name = ? AND expires_at > ? ORDER BY id DESC LIMIT 1", (service_name, now))
-        custom_range_row = cursor.fetchone()
+        selected_range = None
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{VOLTEXX_BASE_URL}/active-ranges", headers=VOLTEXX_HEADERS, timeout=4) as resp:
+                    if resp.status == 200:
+                        json_data = await resp.json()
+                        active_ranges = json_data.get('data', {}).get('active_ranges', json_data.get('active_ranges', []))
+                        
+                        # সার্ভিস নেম ম্যাচ করে ফিল্টার করা
+                        matched = [r for r in active_ranges if str(r.get('service', '')).lower() == service_name.lower()]
+                        if matched:
+                            # সবচেয়ে বেশি হিট বা রানিং রেঞ্জটি সবার আগে সিলেক্ট করবে
+                            matched.sort(key=lambda x: x.get('hits', 0), reverse=True)
+                            selected_range = matched[0].get('range')
+        except Exception:
+            pass
 
-        selected_range = "4473845XXX"
-
-        if custom_range_row:
-            selected_range = custom_range_row[0]
-        else:
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(f"{ZENEX_BASE_URL}/v1/active-ranges", headers=ZENEX_HEADERS, timeout=3) as resp:
-                        if resp.status == 200:
-                            json_data = await resp.json()
-                            if json_data.get('success'):
-                                matched = [r for r in json_data['data']['active_ranges'] if r['service'].lower() == service_name.lower()]
-                                if matched:
-                                    matched.sort(key=lambda x: x['hits'], reverse=True)
-                                    selected_range = matched[0]['range']
-            except Exception:
-                pass
+        # যদি অটো রেঞ্জ না পাওয়া যায়, তবে ডিফল্ট ফলব্যাক রেঞ্জ ব্যবহার করবে
+        if not selected_range:
+            selected_range = "4473845XXX"
 
         try:
             payload = {"range": selected_range, "is_national": False, "remove_plus": False}
             async with aiohttp.ClientSession() as session:
-                async with session.post(f"{ZENEX_BASE_URL}/v1/getnum", json=payload, headers=ZENEX_HEADERS, timeout=5) as resp:
+                async with session.post(f"{VOLTEXX_BASE_URL}/getnum", json=payload, headers=VOLTEXX_HEADERS, timeout=5) as resp:
                     res_json = await resp.json()
 
-                    if res_json.get('meta', {}).get('code') == 200:
-                        num_info = res_json['data']
-                        number = num_info['full_number']
+                    if res_json.get('meta', {}).get('code') == 200 or res_json.get('success') or 'data' in res_json:
+                        num_info = res_json.get('data', res_json)
+                        number = num_info.get('full_number', num_info.get('number'))
                         country_name = num_info.get('country', 'Unknown')
 
                         active_numbers[user_id] = {"number": number, "service": service_name}
@@ -421,7 +360,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     else:
                         await context.bot.send_message(chat_id, "❌ এই মুহূর্তে কোনো নম্বর খালি নেই। চেষ্টা চালিয়ে যান।")
         except Exception:
-            await context.bot.send_message(chat_id, "⚠️ API এরিয়া ত্রুটি! আবার ট্রাই করুন।")
+            await context.bot.send_message(chat_id, "⚠️ Voltexx API কানেকশন এরর! আবার ট্রাই করুন।")
 
     elif data == 'withdraw_request':
         cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
@@ -439,14 +378,13 @@ async def otp_poller(application: Application):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                async with session.get(f"{ZENEX_BASE_URL}/v1/numsuccess/info", headers=ZENEX_HEADERS, timeout=4) as resp:
+                async with session.get(f"{VOLTEXX_BASE_URL}/numsuccess/info", headers=VOLTEXX_HEADERS, timeout=4) as resp:
                     if resp.status == 200:
                         res_json = await resp.json()
+                        otps_data = res_json.get('data', {}).get('otps', res_json.get('otps', []))
 
-                        if res_json.get('data', {}).get('otps'):
-                            otps = res_json['data']['otps']
-
-                            for item in otps:
+                        if otps_data:
+                            for item in otps_data:
                                 raw_num = item['number']
                                 masked_num = raw_num[:6] + "****" + raw_num[-2:]
 
@@ -454,9 +392,9 @@ async def otp_poller(application: Application):
                                     f"📥 **নতুন OTP এসেছে!**\n\n"
                                     f"📱 **নম্বর:** `{masked_num}`\n"
                                     f"🔑 **OTP Code:** `{item['otp']}`\n\n"
-                                    f"🤖 *Number Bot*"
+                                    f"🤖 *Voltexx Bot*"
                                 )
-                                kb = InlineKeyboardMarkup([[InlineKeyboardButton("🤖 Facebook~OTP Bot", url=BOT_LINK)]])
+                                kb = InlineKeyboardMarkup([[InlineKeyboardButton("🤖 Voltexx Bot", url=BOT_LINK)]])
 
                                 try:
                                     await application.bot.send_message(chat_id=OTP_GROUP_ID, text=group_msg, parse_mode='Markdown', reply_markup=kb)
@@ -492,7 +430,6 @@ async def post_init(application: Application):
     asyncio.create_task(otp_poller(application))
 
 def main():
-    # টাইমআউট কনফিগারেশনসহ অ্যাপ বিল্ড করা হয়েছে যা রেন্ডারে কোনো টাইমআউট এরর দেবে না
     application = (
         Application.builder()
         .token(TELEGRAM_BOT_TOKEN)
@@ -508,7 +445,7 @@ def main():
     application.add_handler(CommandHandler("admin", handle_message))
     application.add_handler(CallbackQueryHandler(handle_callback))
 
-    print("🚀 Facebook~OTP Ultra-Fast Python Bot is now LIVE!")
+    print("🚀 Voltexx API Python Bot (Auto-Range) is now LIVE!")
     application.run_polling()
 
 if __name__ == '__main__':
