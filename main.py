@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 import threading
 import time
@@ -15,27 +16,26 @@ logging.basicConfig(
 API_KEY = "M1SKU6KCG8G"
 BASE_URL = "https://api.2oo9.cloud/MXS47FLFX0U/tnevs/@public/api"
 HEADERS = {"mauthapi": API_KEY, "Content-Type": "application/json"}
-BOT_TOKEN = "8719901060:AAF013K1EnqAIIXQS_0X4SxJIa3FdjNJ0Lg"
+
+# পরিবেশ বা Render Environment Variable থেকে টোকেন নেওয়ার ব্যবস্থা
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8816724773:AAGtagQF2r0UvC8_B8TXzfT5MP-Z054fWo")
 LOG_GROUP_ID = -1004315116332
 
 
 def get_active_countries_from_otps():
-    """সফল ওটিপির তালিকা থেকে স্বয়ংক্রিয়ভাবে দেশ বা প্রিফিক্স বের করবে যেখানে কোড আসছে"""
+    """সফল ওটিপির তালিকা থেকে স্বয়ংক্রিয়ভাবে দেশ বা প্রিফিক্স বের করবে যেখানে কোড আসছে"""
     try:
         response = requests.get(f"{BASE_URL}/success-otp", headers=HEADERS).json()
         if response.get("meta", {}).get("code") == 200:
-            otps_list = response.get("data", {}.get("otps", []))
+            otps_list = response.get("data", {}).get("otps", [])
             countries_set = set()
             
             for otp in otps_list:
                 number = otp.get("number", "")
                 message = otp.get("message", "")
                 
-                # যদি ফেসবুক বা কোড সম্পর্কিত হয়, তবে নাম্বার থেকে দেশ বা প্রিফিক্স আলাদা করা
                 if number and ("facebook" in message.lower() or "fb" in message.lower() or re.search(r"\d+", message)):
-                    # এখানে নাম্বার থেকে দেশের কোড বা অংশ আলাদা করা যেতে পারে
-                    # অথবা সরাসরি নাম্বার বা কান্ট্রি ট্যাগ ব্যবহার করা যায়
-                    country_code = number[:3]  # উদাহরণের জন্য প্রথম ৩ ডিজিট বা কান্ট্রি প্রিফিক্স
+                    country_code = number[:3]  
                     countries_set.add((country_code, number))
                     
             return list(countries_set)
@@ -72,11 +72,9 @@ def get_otp_from_api(target):
 
 # --- টেলিগ্রাম কমান্ড হ্যান্ডলার ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # এপিআই থেকে যে দেশগুলোতে কোড আসছে সেগুলো অটো ফেচ করা
     active_items = get_active_countries_from_otps()
     
     keyboard = []
-    # সাধারণ একটিভ বাটন অথবা অটো জেনারেটেড দেশ/নাম্বারের বাটন তৈরি
     keyboard.append([InlineKeyboardButton("📱 Get Active Facebook Number", callback_data="get_live_num")])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -115,7 +113,7 @@ async def button_click_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 otp_display_text = (
                     f"📱 **Facebook** | `{phone}`\n"
                     f"🔑 **Key:** `{code}`\n"
-                    f"💬 *Thanks for using @tn_ms_bot*"
+                    f"💬 *Thanks for using @FastCloudOTP_bot*"
                 )
 
                 await query.message.reply_text(otp_display_text, parse_mode="Markdown")
