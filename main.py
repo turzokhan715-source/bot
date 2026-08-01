@@ -17,13 +17,11 @@ API_KEY = "M1SKU6KCG8G"
 BASE_URL = "https://api.2oo9.cloud/MXS47FLFX0U/tnevs/@public/api"
 HEADERS = {"mauthapi": API_KEY, "Content-Type": "application/json"}
 
-# পরিবেশ বা Render Environment Variable থেকে টোকেন নেওয়ার ব্যবস্থা
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8816724773:AAGtagQF2r0UvC8_B8TXzfT5MP-Z054fWo")
 LOG_GROUP_ID = -1004315116332
 
 
 def get_active_countries_from_otps():
-    """সফল ওটিপির তালিকা থেকে স্বয়ংক্রিয়ভাবে দেশ বা প্রিফিক্স বের করবে যেখানে কোড আসছে"""
     try:
         response = requests.get(f"{BASE_URL}/success-otp", headers=HEADERS).json()
         if response.get("meta", {}).get("code") == 200:
@@ -45,7 +43,6 @@ def get_active_countries_from_otps():
 
 
 def get_number_from_api():
-    """API থেকে নতুন নাম্বার তুলবে"""
     try:
         response = requests.post(
             f"{BASE_URL}/getnum", headers=HEADERS, json={}
@@ -70,7 +67,6 @@ def get_otp_from_api(target):
     return None
 
 
-# --- টেলিগ্রাম কমান্ড হ্যান্ডলার ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     active_items = get_active_countries_from_otps()
     
@@ -105,7 +101,6 @@ async def button_click_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         await query.message.reply_text(assigned_text, parse_mode="Markdown")
 
-        # ওটিপি ট্র্যাক করার লুপ
         for _ in range(18):
             time.sleep(10)
             code = get_otp_from_api(phone)
@@ -131,9 +126,16 @@ async def button_click_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.message.reply_text(f"⌛ নাম্বার `{phone}` এর জন্য কোনো ওটিপি আসেনি (Time out)।")
 
 
-# --- মূল রান ফাংশন ---
 def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    # টাইমআউট বাড়িয়ে ৩০ সেকেন্ড করা হয়েছে যাতে রেন্ডারে কানেকশন ড্রপ না করে
+    app = (
+        ApplicationBuilder()
+        .token(BOT_TOKEN)
+        .connect_timeout(30.0)
+        .read_timeout(30.0)
+        .write_timeout(30.0)
+        .build()
+    )
 
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CallbackQueryHandler(button_click_handler))
